@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nexus-pv-volume
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/kubevolumes/nexus_data"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nexus-statefulset
+  labels:
+    app: nexus
+spec:
+  serviceName: nexus-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexus
+  template:
+    metadata:
+      labels:
+        app: nexus
+    spec:
+      containers:
+      - name: nexus
+        image: sonatype/nexus3:3.19.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8081
+        - containerPort: 5000
+        volumeMounts:
+        - mountPath: "/nexus-data"
+          name: nexus-pv-claim
+      initContainers:
+      - name: volume-mount-data-log
+        image: busybox
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "chown -R 200:200 /nexus-data"]
+        volumeMounts:
+        - mountPath: "/nexus-data"
+          name: nexus-pv-claim
+  volumeClaimTemplates:
+  - metadata:
+      name: nexus-pv-claim
+    spec:
+      storageClassName: manual
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus-service
+  labels:
+    app: nexus-svc
+spec:
+  ports:
+  - port: 8081
+    targetPort: 8081
+    protocol: TCP
+    name: app
+  - port: 5000
+    targetPort: 5000
+    protocol: TCP
+    name: docker
+  selector:
+    app: nexus
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: nexus-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/add-base-url: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+spec:
+  rules:
+  - host: nexus.example.com
+    http:
+      paths:
+        - path: /
+          backend:
+            serviceName: nexus-service
+            servicePort: 8081
+  - host: docker.example.com
+    http:
+      paths:
+        - path: /
+          backend:
+            serviceName: nexus-service
+            servicePort: 5000
